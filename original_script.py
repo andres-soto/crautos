@@ -25,9 +25,6 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
 }
 
-# Exchange rate: approximately 497 colones per dollar (based on website examples)
-EXCHANGE_RATE = 497
-
 # Brand ID to Name mapping (from the actual HTML select element)
 BRAND_MAP = {
     '20': 'Acura', '124': 'Aion', '1': 'Alfa Romeo', '68': 'AMC', '2': 'Aro', '3': 'Asia',
@@ -355,45 +352,92 @@ def get_page_data(page_number, payload, session=None):
     print(f"   Warning: Status code {response.status_code} for page {page_number}")
     return None
 
+def parse_currency_text(text):
+    """
+    Parses a price string to extract the value and currency.
+    Returns (value, currency_symbol) where value is int and currency_symbol is '$' or '¢'.
+    """
+    if not text:
+        return None, None
+
+    # Clean value
+    clean_val = re.sub(r'[^\d]', '', text)
+    if not clean_val:
+        return None, None
+
+    value = int(clean_val)
+
+    # Determine currency
+    if '$' in text:
+        return value, '$'
+    elif '¢' in text:
+        return value, '¢'
+    else:
+        # If no symbol found, return None for currency
+        return value, None
+
 def extract_prices(soup):
-    """Extracts Colon prices from the page using the specific classes found in your HTML."""
+    """
+    Extracts both Colones and Dollar prices from the page.
+    Returns a list of tuples: (colones_value, usd_value)
+    Both values can be None if not found.
+    """
     # Only extract prices from the main search results form, not from featured/related cars
-    # The actual search results are in a form with name="form" that posts to "ucompare.cfm"
     main_form = soup.find('form', {'name': 'form', 'action': re.compile(r'ucompare\.cfm')})
     
     if not main_form:
         # Fallback: try to find the main results section
-        # Look for the section that contains the car listings (before featured cars)
         main_section = soup.find('section', class_='sptb')
         if main_section:
-            # Get all forms in the main section, find the one with ucompare.cfm
             forms = main_section.find_all('form')
             for form in forms:
                 if form.get('action', '').endswith('ucompare.cfm'):
                     main_form = form
                     break
     
+    page_prices = []
+
     if not main_form:
-        # Fallback to original behavior if form not found
+        # Fallback to finding price tags directly if form not found
+        # Iterate over .precio tags and find sibling .preciodolares
         price_tags = soup.find_all('span', class_=re.compile(r'precio(-sm)?$'))
-        page_prices = []
+        seen_tags = set()
+
         for tag in price_tags:
-            text = tag.get_text()
-            clean_val = re.sub(r'[^\d]', '', text)
-            if clean_val:
-                val = int(clean_val)
-                if '$' in text:
-                    val = int(val * EXCHANGE_RATE)
-                page_prices.append(val)
+            if tag in seen_tags:
+                continue
+            seen_tags.add(tag)
+
+            # Find sibling or parent container logic
+            parent = tag.parent
+            dolar_tag = parent.find('span', class_=re.compile(r'preciodolares(-sm)?$'))
+            if not dolar_tag and parent.parent:
+                dolar_tag = parent.parent.find('span', class_=re.compile(r'preciodolares(-sm)?$'))
+
+            p_val, p_curr = parse_currency_text(tag.get_text())
+            d_val, d_curr = parse_currency_text(dolar_tag.get_text()) if dolar_tag else (None, None)
+
+            colones = None
+            usd = None
+
+            # Assign based on currency
+            if p_curr == '¢': colones = p_val
+            elif p_curr == '$': usd = p_val
+
+            if d_curr == '¢': colones = d_val
+            elif d_curr == '$': usd = d_val
+
+            # If no symbols, heuristics (unlikely needed based on observation)
+            if colones is None and usd is None:
+                if p_val is not None: colones = p_val # Default to colones
+
+            if colones is not None or usd is not None:
+                page_prices.append((colones, usd))
+
         return page_prices
     
-    # Extract prices only from car listings that have checkboxes (actual search results)
-    # Each car listing has a checkbox with name="c" and value="car_id"
-    # We'll find these checkboxes and then get the price from the same listing
-    page_prices = []
+    # Extract prices using checkboxes (actual search results)
     seen_car_ids = set()
-    
-    # Find all checkboxes in the form (these identify actual search result cars)
     checkboxes = main_form.find_all('input', {'type': 'checkbox', 'name': 'c'})
     
     for checkbox in checkboxes:
@@ -402,35 +446,65 @@ def extract_prices(soup):
             continue
         seen_car_ids.add(car_id)
         
-        # Find the price near this checkbox (within the same parent container)
-        # Look for the closest price span
         parent = checkbox.find_parent(['div', 'td', 'tr', 'table'])
         if parent:
-            # Find price span in the same container
             price_tag = parent.find('span', class_=re.compile(r'precio(-sm)?$'))
-            if price_tag:
-                text = price_tag.get_text()
-                clean_val = re.sub(r'[^\d]', '', text)
-                if clean_val:
-                    val = int(clean_val)
-                    if '$' in text:
-                        val = int(val * EXCHANGE_RATE)
-                    page_prices.append(val)
-    
-    # If no checkboxes found, fallback to extracting all prices from form
+            dolar_tag = parent.find('span', class_=re.compile(r'preciodolares(-sm)?$'))
+
+            if not price_tag:
+                continue
+
+            p_val, p_curr = parse_currency_text(price_tag.get_text())
+            d_val, d_curr = parse_currency_text(dolar_tag.get_text()) if dolar_tag else (None, None)
+
+            colones = None
+            usd = None
+
+            # Assign based on currency symbol
+            if p_curr == '¢': colones = p_val
+            elif p_curr == '$': usd = p_val
+
+            if d_curr == '¢': colones = d_val
+            elif d_curr == '$': usd = d_val
+
+            # Fallback if no symbol found (assume colones if nothing else)
+            if colones is None and usd is None:
+                if p_val is not None and p_curr is None:
+                    colones = p_val
+
+            if colones is not None or usd is not None:
+                page_prices.append((colones, usd))
+
+    # Fallback if no checkboxes found
     if not page_prices:
         price_tags = main_form.find_all('span', class_=re.compile(r'precio(-sm)?$'))
-        seen_prices = set()
+        seen_vals = set()
+
         for tag in price_tags:
-            text = tag.get_text()
-            clean_val = re.sub(r'[^\d]', '', text)
-            if clean_val:
-                val = int(clean_val)
-                if '$' in text:
-                    val = int(val * EXCHANGE_RATE)
-                if val not in seen_prices:
-                    page_prices.append(val)
-                    seen_prices.add(val)
+            parent = tag.parent
+            dolar_tag = parent.find('span', class_=re.compile(r'preciodolares(-sm)?$'))
+
+            p_val, p_curr = parse_currency_text(tag.get_text())
+            d_val, d_curr = parse_currency_text(dolar_tag.get_text()) if dolar_tag else (None, None)
+
+            colones = None
+            usd = None
+
+            if p_curr == '¢': colones = p_val
+            elif p_curr == '$': usd = p_val
+
+            if d_curr == '¢': colones = d_val
+            elif d_curr == '$': usd = d_val
+
+            # Fallback if no symbol found (assume colones if nothing else)
+            if colones is None and usd is None:
+                if p_val is not None and p_curr is None:
+                    colones = p_val
+
+            pair = (colones, usd)
+            if pair not in seen_vals and (colones is not None or usd is not None):
+                page_prices.append(pair)
+                seen_vals.add(pair)
     
     return page_prices
 
@@ -555,26 +629,32 @@ def main():
         print("Could not find any prices to calculate.")
         return
 
+    colones_prices = [p[0] for p in all_prices if p[0] is not None]
+    usd_prices = [p[1] for p in all_prices if p[1] is not None]
+
     search_desc = format_search_description(params)
-    
-    min_price = min(all_prices)
-    max_price = max(all_prices)
-    avg_price = int(statistics.mean(all_prices))
-    
-    min_usd = min_price / EXCHANGE_RATE
-    max_usd = max_price / EXCHANGE_RATE
-    avg_usd = avg_price / EXCHANGE_RATE
     
     print("\n" + "="*50)
     print(f"RESULTS FOR: {search_desc}")
     print(f"Total processed: {len(all_prices)} cars")
     print("-" * 50)
-    print(f"Minimum:  ¢ {min_price:,}")
-    print(f"          $ {min_usd:,.0f}")
-    print(f"Maximum:  ¢ {max_price:,}")
-    print(f"          $ {max_usd:,.0f}")
-    print(f"Average:  ¢ {avg_price:,}")
-    print(f"          $ {avg_usd:,.0f}")
+
+    if colones_prices:
+        min_c = min(colones_prices)
+        max_c = max(colones_prices)
+        avg_c = int(statistics.mean(colones_prices))
+        print(f"Colones: Min ¢ {min_c:,} | Max ¢ {max_c:,} | Avg ¢ {avg_c:,}")
+    else:
+        print("Colones: No prices found.")
+
+    if usd_prices:
+        min_u = min(usd_prices)
+        max_u = max(usd_prices)
+        avg_u = int(statistics.mean(usd_prices))
+        print(f"Dollars: Min $ {min_u:,.0f} | Max $ {max_u:,.0f} | Avg $ {avg_u:,.0f}")
+    else:
+         print("Dollars: No prices found.")
+
     print("="*50)
 
 if __name__ == "__main__":
