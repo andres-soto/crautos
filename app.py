@@ -17,7 +17,7 @@ def main():
     # Set page title and layout
     st.set_page_config(page_title="Buscador de Precios CR", layout="centered")
 
-    st.title('🔎 Buscador de Precios CR')
+    st.markdown('### 🔎 Buscador de Precios CR')
 
     # ------------------
     # INPUTS
@@ -32,16 +32,18 @@ def main():
     # Model: Text input
     model_str = st.text_input('Modelo', placeholder='Ej. Hilux, Elantra, Rav4')
 
-    # Year: Select slider
-    # Range from 1980 to next year
-    year_options = list(range(1980, 2027))
-    # Default range e.g. 2010-2020
-    year_range = st.select_slider(
-        'Año',
-        options=year_options,
-        value=(2010, 2020)
-    )
-    year_from, year_to = year_range
+    # Year: Number inputs
+    col_y1, col_y2 = st.columns(2)
+    with col_y1:
+        year_from = st.number_input('Año Desde', min_value=1980, max_value=2027, value=2010)
+    with col_y2:
+        year_to = st.number_input('Año Hasta', min_value=1980, max_value=2027, value=2020)
+
+    if year_from > year_to:
+        st.error("El 'Año Desde' no puede ser mayor que el 'Año Hasta'.")
+        # Ensure we don't proceed with invalid range or we just swap them implicitly later if we wanted
+        # But showing error is better UX
+        return
 
     # Transmission: Radio
     # Map friendly names to IDs. 0=Any, 1=Manual, 2=Automatic
@@ -178,19 +180,35 @@ def main():
                 return
 
             # 3. Calculate Stats
-            min_price = min(all_prices)
-            max_price = max(all_prices)
-            avg_price = int(statistics.mean(all_prices))
+            prices_crc = [p['crc'] for p in all_prices if p['crc'] > 0]
+            prices_usd = [p['usd'] for p in all_prices if p['usd'] > 0]
+
+            if not prices_crc:
+                 st.warning("No se encontraron precios válidos.")
+                 return
+
+            min_price = min(prices_crc)
+            max_price = max(prices_crc)
+            avg_price = int(statistics.mean(prices_crc))
+
+            min_usd = 0
+            max_usd = 0
+            avg_usd = 0
+
+            if prices_usd:
+                min_usd = min(prices_usd)
+                max_usd = max(prices_usd)
+                avg_usd = int(statistics.mean(prices_usd))
 
             # Display Results
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Precio Mínimo", f"¢ {min_price:,}")
+                st.metric("Precio Mínimo", f"¢ {min_price:,}\n($ {min_usd:,.0f})")
             with col2:
-                st.metric("Promedio", f"¢ {avg_price:,}")
+                st.metric("Promedio", f"¢ {avg_price:,}\n($ {avg_usd:,.0f})")
             with col3:
-                st.metric("Precio Máximo", f"¢ {max_price:,}")
+                st.metric("Precio Máximo", f"¢ {max_price:,}\n($ {max_usd:,.0f})")
 
 if __name__ == "__main__":
     main()
