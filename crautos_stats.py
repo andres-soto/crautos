@@ -55,6 +55,50 @@ BRAND_MAP = {
     '119': 'Zap', '132': 'Zeekr', '110': 'Zotye'
 }
 
+# Transmission Mapping
+TRANS_MAP = {
+    '1': 'Manual',
+    '2': 'Automatic'
+}
+
+# Fuel Mapping
+FUEL_MAP = {
+    '1': 'Gasoline',
+    '2': 'Diesel',
+    '3': 'Hybrid',
+    '4': 'Electric'
+}
+
+# Province Mapping
+PROVINCE_MAP = {
+    '1': 'Alajuela',
+    '2': 'Cartago',
+    '3': 'Guanacaste',
+    '4': 'Heredia',
+    '5': 'Limón',
+    '6': 'Puntarenas',
+    '7': 'San José'
+}
+
+# Body Style Mapping
+STYLE_MAP = {
+    '02': 'Sedan',
+    '03': 'Station Wagon',
+    '20': 'Hatchback',
+    '04': 'Pick Up 2WD',
+    '05': 'Pick Up 4WD',
+    '06': 'Panel',
+    '07': 'Minibus/Minivan',
+    '08': 'SUV 2WD',
+    '09': 'SUV 4WD/AWD',
+    '15': 'RV',
+    '10': 'Commercial 1.0-3.5 Ton',
+    '11': 'Commercial 4.0-4.5 Ton',
+    '12': 'Commercial 5.0-7.5 Ton',
+    '13': 'Commercial 8.0-9.5 Ton',
+    '14': 'Commercial 10.0+ Ton'
+}
+
 # Reverse mapping: Brand name to ID (case-insensitive)
 BRAND_NAME_TO_ID = {v.lower(): k for k, v in BRAND_MAP.items()}
 
@@ -400,6 +444,35 @@ def format_search_description(params):
             parts.append(f"{year_from}+")
         elif year_to != '0':
             parts.append(f"up to {year_to}")
+
+    # Transmission
+    trans = params.get('trans', '0')
+    if trans != '0':
+        trans_name = TRANS_MAP.get(trans, trans)
+        parts.append(f"[{trans_name}]")
+
+    # Fuel
+    fuel = params.get('fuel', '0')
+    if fuel != '0':
+        fuel_name = FUEL_MAP.get(fuel, fuel)
+        parts.append(f"[{fuel_name}]")
+
+    # Style
+    style = params.get('style', '00')
+    if style != '00':
+        style_name = STYLE_MAP.get(style, f"Style {style}")
+        parts.append(f"[{style_name}]")
+
+    # Province
+    province = params.get('province', '0')
+    if province != '0':
+        prov_name = PROVINCE_MAP.get(province, province)
+        parts.append(f"in {prov_name}")
+
+    # Trade-in
+    recibe = params.get('recibe', '0')
+    if recibe == '1':
+        parts.append("(Accepts Trade-in)")
     
     return " ".join(parts) if parts else "All vehicles"
 
