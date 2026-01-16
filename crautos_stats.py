@@ -352,8 +352,29 @@ def get_page_data(page_number, payload, session=None):
     print(f"   Warning: Status code {response.status_code} for page {page_number}")
     return None
 
+def _parse_price_pair(container):
+    """Helper to extract CRC and USD prices from a container."""
+    # Strategy: Find price tags within the container
+    price_tag = container.find('span', class_=re.compile(r'precio(-sm)?$'))
+    usd_tag = container.find('span', class_=re.compile(r'preciodolares(-sm)?$'))
+
+    crc = 0
+    usd = 0
+
+    if price_tag:
+        clean_val = re.sub(r'[^\d]', '', price_tag.get_text())
+        if clean_val:
+            crc = int(clean_val)
+
+    if usd_tag:
+        clean_val_usd = re.sub(r'[^\d]', '', usd_tag.get_text())
+        if clean_val_usd:
+            usd = int(clean_val_usd)
+
+    return crc, usd
+
 def extract_prices(soup):
-    """Extracts Colon prices from the page using the specific classes found in your HTML."""
+    """Extracts Colon and Dollar prices from the page using the specific classes."""
     # Only extract prices from the main search results form, not from featured/related cars
     # The actual search results are in a form with name="form" that posts to "ucompare.cfm"
     main_form = soup.find('form', {'name': 'form', 'action': re.compile(r'ucompare\.cfm')})
@@ -375,9 +396,11 @@ def extract_prices(soup):
         price_tags = soup.find_all('span', class_=re.compile(r'precio(-sm)?$'))
         page_prices = []
         for tag in price_tags:
-            clean_val = re.sub(r'[^\d]', '', tag.get_text())
-            if clean_val:
-                page_prices.append(int(clean_val))
+            parent = tag.parent
+            if parent:
+                crc, usd = _parse_price_pair(parent)
+                if crc > 0:
+                    page_prices.append({'crc': crc, 'usd': usd})
         return page_prices
     
     # Extract prices only from car listings that have checkboxes (actual search results)
@@ -396,27 +419,24 @@ def extract_prices(soup):
         seen_car_ids.add(car_id)
         
         # Find the price near this checkbox (within the same parent container)
-        # Look for the closest price span
         parent = checkbox.find_parent(['div', 'td', 'tr', 'table'])
         if parent:
-            # Find price span in the same container
-            price_tag = parent.find('span', class_=re.compile(r'precio(-sm)?$'))
-            if price_tag:
-                clean_val = re.sub(r'[^\d]', '', price_tag.get_text())
-                if clean_val:
-                    page_prices.append(int(clean_val))
+            crc, usd = _parse_price_pair(parent)
+            if crc > 0:
+                page_prices.append({'crc': crc, 'usd': usd})
     
     # If no checkboxes found, fallback to extracting all prices from form
     if not page_prices:
         price_tags = main_form.find_all('span', class_=re.compile(r'precio(-sm)?$'))
         seen_prices = set()
         for tag in price_tags:
-            clean_val = re.sub(r'[^\d]', '', tag.get_text())
-            if clean_val:
-                price = int(clean_val)
-                if price not in seen_prices:
-                    page_prices.append(price)
-                    seen_prices.add(price)
+            parent = tag.parent
+            if parent:
+                crc, usd = _parse_price_pair(parent)
+                if crc > 0:
+                    if crc not in seen_prices:
+                        page_prices.append({'crc': crc, 'usd': usd})
+                        seen_prices.add(crc)
     
     return page_prices
 
@@ -543,24 +563,35 @@ def main():
 
     search_desc = format_search_description(params)
     
-    # Exchange rate: approximately 497 colones per dollar (based on website examples)
-    EXCHANGE_RATE = 497
-    
-    min_price = min(all_prices)
-    max_price = max(all_prices)
-    avg_price = int(statistics.mean(all_prices))
-    
-    min_usd = min_price / EXCHANGE_RATE
-    max_usd = max_price / EXCHANGE_RATE
-    avg_usd = avg_price / EXCHANGE_RATE
+    prices_crc = [p['crc'] for p in all_prices if p['crc'] > 0]
+    prices_usd = [p['usd'] for p in all_prices if p['usd'] > 0]
     
     print("\n" + "="*50)
     print(f"RESULTS FOR: {search_desc}")
     print(f"Total processed: {len(all_prices)} cars")
     print("-" * 50)
-    print(f"Minimum:  ¢ {min_price:,}  |  $ {min_usd:,.0f}")
-    print(f"Maximum:  ¢ {max_price:,}  |  $ {max_usd:,.0f}")
-    print(f"Average:  ¢ {avg_price:,}  |  $ {avg_usd:,.0f}")
+
+    if prices_crc:
+        min_price = min(prices_crc)
+        max_price = max(prices_crc)
+        avg_price = int(statistics.mean(prices_crc))
+
+        min_usd_val = 0
+        max_usd_val = 0
+        avg_usd_val = 0
+
+        # Calculate USD stats independently if available
+        if prices_usd:
+            min_usd_val = min(prices_usd)
+            max_usd_val = max(prices_usd)
+            avg_usd_val = int(statistics.mean(prices_usd))
+
+        print(f"Minimum:  ¢ {min_price:,}  |  $ {min_usd_val:,.0f}")
+        print(f"Maximum:  ¢ {max_price:,}  |  $ {max_usd_val:,.0f}")
+        print(f"Average:  ¢ {avg_price:,}  |  $ {avg_usd_val:,.0f}")
+    else:
+        print("No valid prices found.")
+
     print("="*50)
 
 if __name__ == "__main__":
