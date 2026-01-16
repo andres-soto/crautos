@@ -25,6 +25,9 @@ HEADERS = {
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36'
 }
 
+# Exchange rate: approximately 497 colones per dollar (based on website examples)
+EXCHANGE_RATE = 497
+
 # Brand ID to Name mapping (from the actual HTML select element)
 BRAND_MAP = {
     '20': 'Acura', '124': 'Aion', '1': 'Alfa Romeo', '68': 'AMC', '2': 'Aro', '3': 'Asia',
@@ -375,9 +378,13 @@ def extract_prices(soup):
         price_tags = soup.find_all('span', class_=re.compile(r'precio(-sm)?$'))
         page_prices = []
         for tag in price_tags:
-            clean_val = re.sub(r'[^\d]', '', tag.get_text())
+            text = tag.get_text()
+            clean_val = re.sub(r'[^\d]', '', text)
             if clean_val:
-                page_prices.append(int(clean_val))
+                val = int(clean_val)
+                if '$' in text:
+                    val = int(val * EXCHANGE_RATE)
+                page_prices.append(val)
         return page_prices
     
     # Extract prices only from car listings that have checkboxes (actual search results)
@@ -402,21 +409,28 @@ def extract_prices(soup):
             # Find price span in the same container
             price_tag = parent.find('span', class_=re.compile(r'precio(-sm)?$'))
             if price_tag:
-                clean_val = re.sub(r'[^\d]', '', price_tag.get_text())
+                text = price_tag.get_text()
+                clean_val = re.sub(r'[^\d]', '', text)
                 if clean_val:
-                    page_prices.append(int(clean_val))
+                    val = int(clean_val)
+                    if '$' in text:
+                        val = int(val * EXCHANGE_RATE)
+                    page_prices.append(val)
     
     # If no checkboxes found, fallback to extracting all prices from form
     if not page_prices:
         price_tags = main_form.find_all('span', class_=re.compile(r'precio(-sm)?$'))
         seen_prices = set()
         for tag in price_tags:
-            clean_val = re.sub(r'[^\d]', '', tag.get_text())
+            text = tag.get_text()
+            clean_val = re.sub(r'[^\d]', '', text)
             if clean_val:
-                price = int(clean_val)
-                if price not in seen_prices:
-                    page_prices.append(price)
-                    seen_prices.add(price)
+                val = int(clean_val)
+                if '$' in text:
+                    val = int(val * EXCHANGE_RATE)
+                if val not in seen_prices:
+                    page_prices.append(val)
+                    seen_prices.add(val)
     
     return page_prices
 
@@ -543,9 +557,6 @@ def main():
 
     search_desc = format_search_description(params)
     
-    # Exchange rate: approximately 497 colones per dollar (based on website examples)
-    EXCHANGE_RATE = 497
-    
     min_price = min(all_prices)
     max_price = max(all_prices)
     avg_price = int(statistics.mean(all_prices))
@@ -558,9 +569,12 @@ def main():
     print(f"RESULTS FOR: {search_desc}")
     print(f"Total processed: {len(all_prices)} cars")
     print("-" * 50)
-    print(f"Minimum:  ¢ {min_price:,}  |  $ {min_usd:,.0f}")
-    print(f"Maximum:  ¢ {max_price:,}  |  $ {max_usd:,.0f}")
-    print(f"Average:  ¢ {avg_price:,}  |  $ {avg_usd:,.0f}")
+    print(f"Minimum:  ¢ {min_price:,}")
+    print(f"          $ {min_usd:,.0f}")
+    print(f"Maximum:  ¢ {max_price:,}")
+    print(f"          $ {max_usd:,.0f}")
+    print(f"Average:  ¢ {avg_price:,}")
+    print(f"          $ {avg_usd:,.0f}")
     print("="*50)
 
 if __name__ == "__main__":
